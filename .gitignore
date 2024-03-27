@@ -320,3 +320,5 @@ src/amalgamation/
 #docs
 velox/docs/sphinx/source/README_generated_*
 velox/docs/bindings/python/_generate/*
+
+.cache

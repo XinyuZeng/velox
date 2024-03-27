@@ -25,13 +25,23 @@ services:
     build:
       context: .
       dockerfile: scripts/ubuntu-22.04-cpp.dockerfile
+      network: host
+      extra_hosts:
+        - "host.docker.internal:127.0.0.1"
     environment:
-      NUM_THREADS: 8 # default value for NUM_THREADS
+      NUM_THREADS: 128 # default value for NUM_THREADS
       VELOX_DEPENDENCY_SOURCE: BUNDLED # Build dependencies from source
       CCACHE_DIR: "/velox/.ccache"
+      HTTP_PROXY: 'http://host.docker.internal:10809'
+      HTTPS_PROXY: 'http://host.docker.internal:10809'
+      NO_PROXY: 'host.docker.internal, localhost, *.test.lan'
     volumes:
       - .:/velox:delegated
     command: scripts/docker-command.sh
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"
+      # - "host.docker.internal:172.17.0.1"
 
   centos-cpp:
     # Usage:
@@ -70,14 +80,13 @@ services:
       - .:/velox:delegated
     command: cd /velox && make python-test
 
-
   presto-java:
-  # Usage:
-  #   docker-compose pull presto-java or docker-compose build presto-java
-  #   docker-compose run --rm presto-java
-  #   or
-  #   docker-compose run -e NUM_THREADS=<NUMBER_OF_THREADS_TO_USE> --rm presto-java
-  #   to set the number of threads used during compilation
+    # Usage:
+    #   docker-compose pull presto-java or docker-compose build presto-java
+    #   docker-compose run --rm presto-java
+    #   or
+    #   docker-compose run -e NUM_THREADS=<NUMBER_OF_THREADS_TO_USE> --rm presto-java
+    #   to set the number of threads used during compilation
     image: ghcr.io/facebookincubator/velox-dev:presto-java
     build:
       args:
