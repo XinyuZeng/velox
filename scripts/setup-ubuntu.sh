@@ -23,18 +23,21 @@ source $SCRIPTDIR/setup-helper-functions.sh
 CPU_TARGET="${CPU_TARGET:-avx}"
 COMPILER_FLAGS=$(get_cxx_flags "$CPU_TARGET")
 export COMPILER_FLAGS
-FB_OS_VERSION=v2023.12.04.00
+FB_OS_VERSION=v2024.02.26.00
 FMT_VERSION=10.1.1
+BOOST_VERSION=boost-1.84.0
 NPROC=$(getconf _NPROCESSORS_ONLN)
 DEPENDENCY_DIR=${DEPENDENCY_DIR:-$(pwd)}
 export CMAKE_BUILD_TYPE=Release
+SUDO="${SUDO:-"sudo --preserve-env"}"
 
 # Install all velox and folly dependencies.
 # The is an issue on 22.04 where a version conflict prevents glog install,
 # installing libunwind first fixes this.
-apt update && apt install sudo
-sudo --preserve-env apt update && sudo --preserve-env apt install -y libunwind-dev && \
-  sudo --preserve-env apt install -y \
+
+${SUDO} apt update
+${SUDO} apt install -y libunwind-dev
+${SUDO} apt install -y \
   g++ \
   cmake \
   ccache \
@@ -44,7 +47,6 @@ sudo --preserve-env apt update && sudo --preserve-env apt install -y libunwind-d
   libc-ares-dev \
   libcurl4-openssl-dev \
   libssl-dev \
-  libboost-all-dev \
   libicu-dev \
   libdouble-conversion-dev \
   libgoogle-glog-dev \
@@ -72,6 +74,12 @@ function install_fmt {
   cmake_install -DFMT_TEST=OFF
 }
 
+function install_boost {
+  github_checkout boostorg/boost "${BOOST_VERSION}" --recursive
+  ./bootstrap.sh --prefix=/usr/local
+  ${SUDO} ./b2 "-j$(nproc)" -d0 install threading=multi
+}
+
 function install_folly {
   github_checkout facebook/folly "${FB_OS_VERSION}"
   cmake_install -DBUILD_TESTS=OFF -DFOLLY_HAVE_INT128_T=ON
@@ -94,27 +102,30 @@ function install_mvfst {
 
 function install_fbthrift {
   github_checkout facebook/fbthrift "${FB_OS_VERSION}"
-  cmake_install -DBUILD_TESTS=OFF
+  cmake_install -Denable_tests=OFF -DBUILD_TESTS=OFF -DBUILD_SHARED_LIBS=OFF
 }
 
 function install_conda {
-  mkdir -p conda && cd conda
+  MINICONDA_PATH=/opt/miniconda-for-velox
+  if [ -e ${MINICONDA_PATH} ]; then
+    echo "File or directory already exists: ${MINICONDA_PATH}"
+    return
+  fi
   ARCH=$(uname -m)
-  
   if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "aarch64" ]; then
     echo "Unsupported architecture: $ARCH"
     exit 1
   fi
   
+  mkdir -p conda && cd conda
   wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-$ARCH.sh
-  
-  MINICONDA_PATH=/opt/miniconda-for-velox
   bash Miniconda3-latest-Linux-$ARCH.sh -b -p $MINICONDA_PATH
 }
 
 
 function install_velox_deps {
   run_and_time install_fmt
+  run_and_time install_boost
   run_and_time install_folly
   run_and_time install_fizz
   run_and_time install_wangle

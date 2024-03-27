@@ -155,6 +155,17 @@ void SpillState::finishFile(uint32_t partition) {
   writer->finishFile();
 }
 
+size_t SpillState::numFinishedFiles(uint32_t partition) const {
+  if (!isPartitionSpilled(partition)) {
+    return 0;
+  }
+  const auto* writer = partitionWriter(partition);
+  if (writer == nullptr) {
+    return 0;
+  }
+  return writer->numFinishedFiles();
+}
+
 SpillFiles SpillState::finish(uint32_t partition) {
   auto* writer = partitionWriter(partition);
   if (writer == nullptr) {
@@ -278,5 +289,50 @@ SpillPartitionIdSet toSpillPartitionIdSet(
     partitionIdSet.insert(partitionEntry.first);
   }
   return partitionIdSet;
+}
+
+tsan_atomic<int32_t>& testingSpillPct() {
+  static tsan_atomic<int32_t> spillPct = 0;
+  return spillPct;
+}
+
+tsan_atomic<int32_t>& testingSpillCounter() {
+  static tsan_atomic<int32_t> spillCounter = 0;
+  return spillCounter;
+}
+
+TestScopedSpillInjection::TestScopedSpillInjection(
+    int32_t spillPct,
+    int32_t maxInjections) {
+  VELOX_CHECK_EQ(testingSpillCounter(), 0);
+  testingSpillPct() = spillPct;
+  testingSpillCounter() = maxInjections;
+}
+
+TestScopedSpillInjection::~TestScopedSpillInjection() {
+  testingSpillPct() = 0;
+  testingSpillCounter() = 0;
+}
+
+bool testingTriggerSpill() {
+  // Do not evaluate further if trigger is not set.
+  if (testingSpillCounter() <= 0 || testingSpillPct() <= 0) {
+    return false;
+  }
+  if (folly::Random::rand32() % 100 < testingSpillPct()) {
+    return testingSpillCounter()-- > 0;
+  }
+  return false;
+}
+
+void removeEmptyPartitions(SpillPartitionSet& partitionSet) {
+  auto it = partitionSet.begin();
+  while (it != partitionSet.end()) {
+    if (it->second->numFiles() > 0) {
+      ++it;
+    } else {
+      it = partitionSet.erase(it);
+    }
+  }
 }
 } // namespace facebook::velox::exec

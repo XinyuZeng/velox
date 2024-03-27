@@ -177,6 +177,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
 
     for (auto partition = 0; partition < state_->maxPartitions(); ++partition) {
       ASSERT_FALSE(state_->isPartitionSpilled(partition));
+      ASSERT_EQ(state_->numFinishedFiles(partition), 0);
       // Expect an exception if partition is not set to spill.
       {
         RowVectorPtr dummyInput;
@@ -224,9 +225,11 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
         ASSERT_TRUE(
             state_->testingNonEmptySpilledPartitionSet().contains(partition));
 
+        ASSERT_GE(state_->numFinishedFiles(partition), 0);
         // Indicates that the next additions to 'partition' are not sorted
         // with respect to the values added so far.
         state_->finishFile(partition);
+        ASSERT_GE(state_->numFinishedFiles(partition), 1);
         ASSERT_TRUE(
             state_->testingNonEmptySpilledPartitionSet().contains(partition));
       }
@@ -248,6 +251,11 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
     ASSERT_GT(
         stats_.rlock()->spilledBytes,
         numPartitions * numBatches * sizeof(int64_t));
+    int numFinishedFiles{0};
+    for (int partition = 0; partition < numPartitions; ++partition) {
+      numFinishedFiles += state_->numFinishedFiles(partition);
+    }
+    ASSERT_EQ(numFinishedFiles, expectedFiles);
   }
 
   // 'numDuplicates' specifies the number of duplicates generated for each
@@ -341,6 +349,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
 
     for (auto partition = 0; partition < state_->maxPartitions(); ++partition) {
       auto spillFiles = state_->finish(partition);
+      ASSERT_EQ(state_->numFinishedFiles(partition), 0);
       auto spillPartition =
           SpillPartition(SpillPartitionId{0, partition}, std::move(spillFiles));
       auto merge = spillPartition.createOrderedReader(pool());
@@ -738,6 +747,58 @@ TEST_P(SpillTest, nonExistSpillFileOnDeletion) {
   // test.
   tempDir_.reset();
   state_.reset();
+}
+
+namespace {
+SpillFiles makeFakeSpillFiles(int32_t numFiles) {
+  auto tempDir = exec::test::TempDirectoryPath::create();
+  static uint32_t fakeFileId{0};
+  SpillFiles files;
+  files.reserve(numFiles);
+  const std::string filePathPrefix = tempDir->path + "/Spill";
+  for (int32_t i = 0; i < numFiles; ++i) {
+    const auto fileId = fakeFileId;
+    files.push_back(
+        {fileId,
+         ROW({"k1", "k2"}, {BIGINT(), BIGINT()}),
+         tempDir->path + "/Spill_" + std::to_string(fileId),
+         1024,
+         1,
+         std::vector<CompareFlags>({}),
+         common::CompressionKind_NONE});
+  }
+  return files;
+}
+} // namespace
+
+TEST(SpillTest, removeEmptyPartitions) {
+  SpillPartitionSet partitionSet;
+  const int32_t partitionOffset = 8;
+  const int32_t numPartitions = 8;
+
+  for (int32_t partition = 0; partition < numPartitions; ++partition) {
+    const SpillPartitionId id(partitionOffset, partition);
+    if (partition & 0x01) {
+      partitionSet.emplace(
+          id,
+          std::make_unique<SpillPartition>(
+              id, makeFakeSpillFiles(1 + partition / 2)));
+    } else {
+      partitionSet.emplace(id, std::make_unique<SpillPartition>(id));
+    }
+  }
+  ASSERT_EQ(partitionSet.size(), numPartitions);
+
+  removeEmptyPartitions(partitionSet);
+  ASSERT_EQ(partitionSet.size(), numPartitions / 2);
+
+  for (int32_t partition = 0; partition < numPartitions / 2; ++partition) {
+    const int32_t partitionNum = partition * 2 + 1;
+    const SpillPartitionId id(partitionOffset, partitionNum);
+    ASSERT_EQ(partitionSet.at(id)->id().partitionBitOffset(), partitionOffset);
+    ASSERT_EQ(partitionSet.at(id)->id().partitionNumber(), partitionNum);
+    ASSERT_EQ(partitionSet.at(id)->numFiles(), 1 + partitionNum / 2);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(

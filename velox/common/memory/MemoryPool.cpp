@@ -545,7 +545,7 @@ void MemoryPoolImpl::allocateNonContiguous(
   if (!allocator_->allocateNonContiguous(
           numPages,
           out,
-          [this](int64_t allocBytes, bool preAllocate) {
+          [this](uint64_t allocBytes, bool preAllocate) {
             if (preAllocate) {
               reserve(allocBytes);
             } else {
@@ -597,7 +597,7 @@ void MemoryPoolImpl::allocateContiguous(
           numPages,
           nullptr,
           out,
-          [this](int64_t allocBytes, bool preAlloc) {
+          [this](uint64_t allocBytes, bool preAlloc) {
             if (preAlloc) {
               reserve(allocBytes);
             } else {
@@ -632,7 +632,7 @@ void MemoryPoolImpl::growContiguous(
     MachinePageCount increment,
     ContiguousAllocation& allocation) {
   if (!allocator_->growContiguous(
-          increment, allocation, [this](int64_t allocBytes, bool preAlloc) {
+          increment, allocation, [this](uint64_t allocBytes, bool preAlloc) {
             if (preAlloc) {
               reserve(allocBytes);
             } else {
@@ -1077,10 +1077,10 @@ void MemoryPoolImpl::recordAllocDbg(const void* addr, uint64_t size) {
   if (!needRecordDbg(true)) {
     return;
   }
-  const auto stackTrace = process::StackTrace().toString();
   std::lock_guard<std::mutex> l(debugAllocMutex_);
   debugAllocRecords_.emplace(
-      reinterpret_cast<uint64_t>(addr), AllocationRecord{size, stackTrace});
+      reinterpret_cast<uint64_t>(addr),
+      AllocationRecord{size, process::StackTrace()});
 }
 
 void MemoryPoolImpl::recordAllocDbg(const Allocation& allocation) {
@@ -1121,7 +1121,7 @@ void MemoryPoolImpl::recordFreeDbg(const void* addr, uint64_t size) {
         "{}\n",
         size,
         allocRecord.size,
-        allocRecord.callStack,
+        allocRecord.callStack.toString(),
         freeStackTrace));
   }
   debugAllocRecords_.erase(addrUint64);
@@ -1170,7 +1170,7 @@ void MemoryPoolImpl::leakCheckDbg() {
     const auto& allocationRecord = itr.second;
     oss << "======== Leaked memory allocation of " << allocationRecord.size
         << " bytes ========\n"
-        << allocationRecord.callStack;
+        << allocationRecord.callStack.toString();
   }
   VELOX_FAIL(buf.str());
 }

@@ -252,9 +252,9 @@ void HashProbe::maybeSetupSpillInput(
       HashBitRange(
           spillInputPartitionIds_.begin()->partitionBitOffset(),
           spillInputPartitionIds_.begin()->partitionBitOffset() +
-              spillConfig.joinPartitionBits),
+              spillConfig.numPartitionBits),
       &spillConfig,
-      spillConfig.maxFileSize);
+      &spillStats_);
   // Set the spill partitions to the corresponding ones at the build side. The
   // hash probe operator itself won't trigger any spilling.
   spiller_->setPartitionsSpilled(toPartitionNumSet(spillInputPartitionIds_));
@@ -787,9 +787,7 @@ void HashProbe::clearIdentityProjectedOutput() {
 }
 
 bool HashProbe::needLastProbe() const {
-  return !skipInput_ &&
-      (isRightJoin(joinType_) || isFullJoin(joinType_) ||
-       isRightSemiFilterJoin(joinType_) || isRightSemiProjectJoin(joinType_));
+  return !skipInput_ && needRightSideJoin(joinType_);
 }
 
 bool HashProbe::skipProbeOnEmptyBuild() const {
@@ -799,7 +797,8 @@ bool HashProbe::skipProbeOnEmptyBuild() const {
 }
 
 bool HashProbe::spillEnabled() const {
-  return spillConfig_.has_value();
+  return spillConfig_.has_value() &&
+      !operatorCtx_->task()->hasMixedExecutionGroup();
 }
 
 bool HashProbe::hasMoreSpillData() const {
@@ -864,6 +863,9 @@ RowVectorPtr HashProbe::getOutput() {
         prepareForSpillRestore();
         asyncWaitForHashTable();
       } else {
+        if (lastProber_ && spillEnabled()) {
+          joinBridge_->probeFinished();
+        }
         setState(ProbeOperatorState::kFinish);
       }
       return nullptr;
@@ -1381,15 +1383,11 @@ void HashProbe::noMoreInputInternal() {
     VELOX_CHECK_EQ(
         spillInputPartitionIds_.size(), spiller_->spilledPartitionSet().size());
     spiller_->finishSpill(spillPartitionSet_);
-    recordSpillStats();
+    VELOX_CHECK_EQ(spillStats_.rlock()->spillSortTimeUs, 0);
+    VELOX_CHECK_EQ(spillStats_.rlock()->spillFillTimeUs, 0);
   }
 
-  // Setup spill partition data.
   const bool hasSpillData = hasMoreSpillData();
-  if (!needLastProbe() && !hasSpillData) {
-    return;
-  }
-
   std::vector<ContinuePromise> promises;
   std::vector<std::shared_ptr<Driver>> peers;
   // The last operator to finish processing inputs is responsible for producing
@@ -1414,14 +1412,6 @@ void HashProbe::noMoreInputInternal() {
   VELOX_CHECK(promises.empty());
   VELOX_CHECK(hasSpillData || peers.empty());
   lastProber_ = true;
-}
-
-void HashProbe::recordSpillStats() {
-  VELOX_CHECK_NOT_NULL(spiller_);
-  const auto spillStats = spiller_->stats();
-  VELOX_CHECK_EQ(spillStats.spillSortTimeUs, 0);
-  VELOX_CHECK_EQ(spillStats.spillFillTimeUs, 0);
-  Operator::recordSpillStats(spillStats);
 }
 
 bool HashProbe::isFinished() {

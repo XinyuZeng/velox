@@ -313,9 +313,9 @@ Spilling
      - integer
      - 29
      - The start partition bit which is used with `spiller_partition_bits` together to calculate the spilling partition number.
-   * - join_spiller_partition_bits
+   * - spiller_num_partition_bits
      - integer
-     - 2
+     - 3
      - The number of bits (N) used to calculate the spilling partition number for hash join and RowNumber: 2 ^ N. At the moment the maximum
        value is 3, meaning we only support up to 8-way spill partitioning.ing.
    * - testing.spill_pct
@@ -356,29 +356,6 @@ Table Writer
      - integer
      - task_writer_count
      - The number of parallel table writer threads per task for bucketed table writes. If not set, use 'task_writer_count' as default.
-
-Codegen Configuration
----------------------
-.. list-table::
-   :widths: 20 10 10 70
-   :header-rows: 1
-
-   * - Property Name
-     - Type
-     - Default Value
-     - Description
-   * - codegen.enabled
-     - boolean
-     - false
-     - Along with `codegen.configuration_file_path` enables codegen in task execution path.
-   * - codegen.configuration_file_path
-     - string
-     -
-     - A path to the file contaning codegen options.
-   * - codegen.lazy_loading
-     - boolean
-     - true
-     - Triggers codegen initialization tests upon loading if false. Otherwise skips them.
 
 Hive Connector
 --------------
@@ -488,6 +465,12 @@ Each query can override the config by setting corresponding query session proper
      - string
      - 16M
      - Maximum dictionary memory that can be used in orc writer.
+   * - hive.parquet.writer.timestamp-unit
+     - hive.parquet.writer.timestamp_unit
+     - tinyint
+     - 9
+     - Timestamp unit used when writing timestamps into Parquet through Arrow bridge.
+       Valid values are 0 (second), 3 (millisecond), 6 (microsecond), 9 (nanosecond).
 
 ``Amazon S3 Configuration``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -620,3 +603,6 @@ Spark-specific Configuration
      - 4194304
      - The maximum number of bits to use for the bloom filter in :spark:func:`bloom_filter_agg` function,
        the value of this config can not exceed the default value.
+   * - spark.partition_id
+     - integer
+     - The current task's Spark partition ID. It's set by the query engine (Spark) prior to task execution.

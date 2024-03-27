@@ -17,4 +17,4 @@ set -eu
 # Compilation and testing
 make
 while true; do sleep 1000; done
-# cd _build/release && ctest -j${NUM_THREADS} -VV --output-on-failure --no-tests=error
+# cd _build/release && ctest -j${NUM_THREADS} --output-on-failure --no-tests=error
